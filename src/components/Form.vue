@@ -3,13 +3,11 @@ import { bitable, FieldType, NumberFormatter } from "@lark-base-open/js-sdk";
 import { ref, onMounted } from "vue";
 import request from '@/utils/request'
 
-let profile_timer = null;
-let search_timer = null;
+let note_timer = null;
 
 const api_key = ref("");
 const api_key_disabled = ref(true);
 
-const activeName = ref("1");
 const formData = ref({ radio: 1, url: "", social_type: "xhs", pages: 1 });
 const pages_options = ref([
   {
@@ -105,30 +103,19 @@ const createAndWriteData = async (list, type, task_id) => {
   }
   try {
     const fields = [
-      { type: FieldType.Text, name: "视频编号" },
-      { type: FieldType.Text, name: "视频标题" },
-      { type: FieldType.Text, name: "标签" },
-      { type: FieldType.Text, name: "用户ID" },
-      { type: FieldType.Text, name: "作者" },
-      { type: FieldType.Number, name: "点赞数" }, // Number类型,小红书平台可能不支持，可能返回字符串 12.1万
-      { type: FieldType.Number, name: "评论数" },
-      { type: FieldType.Number, name: "收藏数" },
-      { type: FieldType.Number, name: "分享数" },
-      { type: FieldType.Text, name: "下载链接" },
-      { type: FieldType.Text, name: "封面" },
-      { type: FieldType.Number, name: "时长" },
-      { type: FieldType.DateTime, name: "发布时间" },
+      { type: FieldType.Text, name: "文本" },
+      { type: FieldType.Text, name: "头像" },
+      { type: FieldType.Text, name: "昵称" },
+      { type: FieldType.Text, name: "IP地址" },
+      { type: FieldType.DateTime, name: "评论时间" },
     ];
-    console.log("🚀 ~ createAndWriteData ~ fields:", fields)
+    // console.log("🚀 ~ createAndWriteData ~ fields:", fields)
     // 创建表格，创建表格中的字段
     if (!type) { // 第一次请求
       let tableName = '';
-      if (activeName.value == "1") { // 主页
-        const firstItem = list[0];
-        tableName = firstItem?.nickname || '社媒数据助手';
-      } else if (activeName.value == "2") { // 关键词搜索
-        tableName = formData1.value.keyword
-      }
+      // const firstItem = list[0];
+      tableName = '社媒评论获取助手';
+
       // 创建表格
       const { tableId, index } = await createSequentialTable(tableName);
       const newTable = await bitable.base.getTable(tableId);
@@ -170,24 +157,11 @@ const createAndWriteData = async (list, type, task_id) => {
     let records = [];
     for (const item of list) {
       let record = [];
-      record.push(await fieldList[0].createCell(item.aweme_id));
-      record.push(await fieldList[1].createCell(item.title));
-      record.push(await fieldList[2].createCell(item.tags));
-      record.push(await fieldList[3].createCell(item.user_id));
-      record.push(await fieldList[4].createCell(item.nickname));
-      await fieldList[5].setFormatter(NumberFormatter.INTEGER);
-      record.push(await fieldList[5].createCell(item.digg_count));
-      await fieldList[6].setFormatter(NumberFormatter.INTEGER);
-      record.push(await fieldList[6].createCell(item.comment_count));
-      await fieldList[7].setFormatter(NumberFormatter.INTEGER);
-      record.push(await fieldList[7].createCell(item.collect_count));
-      await fieldList[8].setFormatter(NumberFormatter.INTEGER);
-      record.push(await fieldList[8].createCell(item.share_count));
-      record.push(await fieldList[9].createCell(item.play_url));
-      record.push(await fieldList[10].createCell(item.cover_url));
-      await fieldList[11].setFormatter(NumberFormatter.INTEGER);
-      record.push(await fieldList[11].createCell(item.duration));
-      record.push(await fieldList[12].createCell(item.create_time ? item.create_time * 1000 : ''));
+      record.push(await fieldList[0].createCell(item.text));
+      record.push(await fieldList[1].createCell(item.avatar));
+      record.push(await fieldList[2].createCell(item.nickname));
+      record.push(await fieldList[3].createCell(item.ip_label));
+      record.push(await fieldList[4].createCell(item.t_create ? item.t_create * 1000 : ''));
       records.push(record);
     }
     // 写入记录
@@ -277,6 +251,7 @@ const postNoteTask = async () => {
     },
     data: {
       url: formData.value.url,
+      social_type: formData.value.social_type,
       pages: Number(formData.value.pages),
     },
   })
@@ -299,8 +274,8 @@ const postNoteTask = async () => {
 };
 
 const closeNoteInterval = () => {
-  profile_timer && clearInterval(profile_timer);
-  profile_timer = null;
+  note_timer && clearInterval(note_timer);
+  note_timer = null;
 };
 
 // 主页 轮询获取任务状态
@@ -308,7 +283,7 @@ const getNoteTaskInterval = (task_id) => {
   const requestFn = () => {
     let time = 0;
     closeNoteInterval();
-    profile_timer = setInterval(() => {
+    note_timer = setInterval(() => {
       time += 3;
       if (time >= 600) {
         closeNoteInterval();
@@ -401,6 +376,10 @@ const getNoteData = async () => {
 
 const commit = () => {
   // console.log("commit", formData.value);
+  if (!api_key.value) {
+    showErrorMsg("请输入API key");
+    return;
+  }
   const { url } = formData.value;
   if (!String(url)) {
     showErrorMsg("请输入帖子链接");
