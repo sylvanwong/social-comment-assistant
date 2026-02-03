@@ -1,6 +1,6 @@
 <script setup>
-import { bitable, FieldType, NumberFormatter } from "@lark-base-open/js-sdk";
-import { ref, onMounted } from "vue";
+import { bitable, FieldType } from "@lark-base-open/js-sdk";
+import { ref, onMounted, onUnmounted } from "vue";
 import request from '@/utils/request'
 
 let note_timer = null;
@@ -68,6 +68,10 @@ onMounted(async () => {
   if (note_platform && typeof note_platform == "string") {
     formData.value.social_type = note_platform;
   }
+});
+
+onUnmounted(() => {
+  closeNoteInterval();
 });
 
 const saveApiKey = async () => {
@@ -291,7 +295,6 @@ const getNoteTaskInterval = (task_id) => {
         loading.value = false;
       } else {
         getNoteTask(task_id);
-        console.log('time: ~~~~~~', time);
       }
     }, 3000)
   }
@@ -375,7 +378,7 @@ const getNoteData = async () => {
 };
 
 const commit = () => {
-  // console.log("commit", formData.value);
+  if (loading.value) return;
   if (!api_key.value) {
     showErrorMsg("请输入API key");
     return;
@@ -518,8 +521,6 @@ const commit = () => {
 .form :deep(.el-form-item__content) {
   font-size: 14px;
 }
-
-.create-tabs {}
 
 .commit-btn {
   background: #a8071a;
