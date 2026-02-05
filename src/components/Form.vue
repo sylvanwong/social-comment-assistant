@@ -118,7 +118,7 @@ const createAndWriteData = async (list, type, task_id) => {
     if (!type) { // 第一次请求
       let tableName = '';
       // const firstItem = list[0];
-      tableName = '社媒评论获取助手';
+      tableName = '社媒评论加载工具';
 
       // 创建表格
       const { tableId, index } = await createSequentialTable(tableName);
