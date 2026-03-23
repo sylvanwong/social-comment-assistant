@@ -100,9 +100,18 @@ const resetParams = () => {
 
 // 写入数据: 新建表格
 const createAndWriteData = async (list, type, task_id) => {
-  if (!list || list.length == 0) {
+  if (!list) {
     ElMessage({
       message: "获取数据异常，请稍后重试",
+      type: "warning",
+      plain: true,
+    });
+    resetParams();
+    return;
+  }
+  if (list && list.length == 0) {
+    ElMessage({
+      message: "获取数据为空",
       type: "warning",
       plain: true,
     });
