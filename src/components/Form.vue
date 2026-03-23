@@ -8,7 +8,11 @@ let note_timer = null;
 const api_key = ref("");
 const api_key_disabled = ref(true);
 
-const formData = ref({ radio: 1, url: "", social_type: "xhs", pages: 1 });
+const formData = ref({
+  radio: 1, url: "",
+  // social_type: "xhs",
+  pages: 1
+});
 const pages_options = ref([
   {
     value: 0,
@@ -39,16 +43,16 @@ const pages_options = ref([
     label: "获取前50页",
   },
 ]);
-const social_type_options = ref([
-  {
-    value: "xhs",
-    label: "小红书",
-  },
-  {
-    value: "douyin",
-    label: "抖音",
-  },
-]);
+// const social_type_options = ref([
+//   {
+//     value: "xhs",
+//     label: "小红书",
+//   },
+//   {
+//     value: "douyin",
+//     label: "抖音",
+//   },
+// ]);
 
 const loading = ref(false);
 let page = 1;
@@ -61,13 +65,13 @@ onMounted(async () => {
     api_key.value = key;
   }
   const note_url = await bitable.bridge.getData("note_url");
-  const note_platform = await bitable.bridge.getData("note_platform");
+  // const note_platform = await bitable.bridge.getData("note_platform");
   if (note_url && typeof note_url == "string") {
     formData.value.url = note_url;
   }
-  if (note_platform && typeof note_platform == "string") {
-    formData.value.social_type = note_platform;
-  }
+  // if (note_platform && typeof note_platform == "string") {
+  //   formData.value.social_type = note_platform;
+  // }
 });
 
 onUnmounted(() => {
@@ -255,7 +259,7 @@ const postNoteTask = async () => {
     },
     data: {
       url: formData.value.url,
-      social_type: formData.value.social_type,
+      // social_type: formData.value.social_type,
       pages: Number(formData.value.pages),
     },
   })
@@ -391,7 +395,7 @@ const commit = () => {
   getNoteData();
   //
   bitable.bridge.setData("note_url", formData.value.url);
-  bitable.bridge.setData("note_platform", formData.value.social_type);
+  // bitable.bridge.setData("note_platform", formData.value.social_type);
 
 };
 
@@ -434,7 +438,7 @@ const commit = () => {
         </div>
         <el-input v-model="formData.url" class="c-input" placeholder="" />
       </el-form-item>
-      <el-form-item label="">
+      <!-- <el-form-item label="">
         <div slot="label" class="c-label">
           平台
           <el-tooltip effect="dark" placement="top">
@@ -446,7 +450,7 @@ const commit = () => {
         <el-select v-model="formData.social_type" placeholder="请选择" style="width: 100%">
           <el-option v-for="tl in social_type_options" :key="tl.value" :label="tl.label" :value="tl.value" />
         </el-select>
-      </el-form-item>
+      </el-form-item> -->
       <el-form-item label="">
         <div slot="label" class="c-label">
           数据提取范围
