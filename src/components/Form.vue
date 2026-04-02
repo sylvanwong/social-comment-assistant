@@ -61,7 +61,8 @@ let total = 0;
 
 onMounted(async () => {
   const key = await bitable.bridge.getData("api_key");
-  if (key && typeof key === "string") {
+  // 只有 key 非空且为字符串且不是清除标记时才使用
+  if (key && typeof key === "string" && key.trim() && key !== "__cleared__") {
     api_key.value = key;
   }
   const note_url = await bitable.bridge.getData("note_url");
@@ -80,10 +81,13 @@ onUnmounted(() => {
 
 const saveApiKey = async () => {
   if (api_key.value === "") {
+    // 清除存储的 api_key，使用特殊标记值
+    api_key_disabled.value = true;
+    await bitable.bridge.setData("api_key", "__cleared__");
     return;
   } else {
     api_key_disabled.value = true;
-    bitable.bridge.setData("api_key", api_key.value);
+    await bitable.bridge.setData("api_key", api_key.value);
     ElMessage({
       message: "保存成功",
       type: "success",
