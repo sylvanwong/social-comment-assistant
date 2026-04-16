@@ -1,9 +1,10 @@
 <script setup>
 import { bitable, FieldType } from "@lark-base-open/js-sdk";
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, watch } from "vue";
 import request from '@/utils/request'
 
 let note_timer = null;
+const API_KEY_CLEARED_MARKER = "__cleared__";
 
 const api_key = ref("");
 const api_key_disabled = ref(true);
@@ -11,8 +12,18 @@ const api_key_disabled = ref(true);
 const formData = ref({
   radio: 1, url: "",
   // social_type: "xhs",
-  pages: 1
+  pages: 1,
+  table_id: "",
 });
+const table_options = ref([]);
+const EXISTING_TABLE_REQUIRED_FIELD = "文本";
+const EXISTING_TABLE_WRITE_MAPPING = [
+  { name: "文本", getValue: (item) => item?.text ?? "" },
+  { name: "头像", getValue: (item) => item?.avatar ?? "" },
+  { name: "昵称", getValue: (item) => item?.nickname ?? "" },
+  { name: "IP地址", getValue: (item) => item?.ip_label ?? "" },
+  { name: "评论时间", getValue: (item) => (item?.t_create ? item.t_create * 1000 : "") },
+];
 const pages_options = ref([
   {
     value: 0,
@@ -62,8 +73,8 @@ let total = 0;
 onMounted(async () => {
   const key = await bitable.bridge.getData("api_key");
   // 只有 key 非空且为字符串且不是清除标记时才使用
-  if (key && typeof key === "string" && key.trim() && key !== "__cleared__") {
-    api_key.value = key;
+  if (key && typeof key === "string" && key.trim() && key.trim() !== API_KEY_CLEARED_MARKER) {
+    api_key.value = key.trim();
   }
   const note_url = await bitable.bridge.getData("note_url");
   // const note_platform = await bitable.bridge.getData("note_platform");
@@ -75,19 +86,50 @@ onMounted(async () => {
   // }
 });
 
+const loadTableOptions = async () => {
+  try {
+    const tableList = await bitable.base.getTableList();
+    const options = await Promise.all(
+      tableList.map(async (table) => {
+        const id = table?.id || table?.tableId || (typeof table?.getId === "function" ? await table.getId() : "");
+        const name = typeof table?.getName === "function" ? await table.getName() : (table?.name || id);
+        return { id, name };
+      })
+    );
+    table_options.value = options.filter(item => !!item.id);
+  } catch (error) {
+    console.error("获取表格列表失败:", error);
+    showErrorMsg("获取表格列表失败，请稍后重试");
+  }
+};
+
+watch(
+  () => formData.value.radio,
+  (radio) => {
+    if (radio === 2) {
+      loadTableOptions();
+    } else {
+      formData.value.table_id = "";
+    }
+  }
+);
+
 onUnmounted(() => {
   closeNoteInterval();
 });
 
 const saveApiKey = async () => {
-  if (api_key.value === "") {
+  const normalizedKey = String(api_key.value || "").trim();
+  if (!normalizedKey) {
     // 清除存储的 api_key，使用特殊标记值
     api_key_disabled.value = true;
-    await bitable.bridge.setData("api_key", "__cleared__");
+    api_key.value = "";
+    await bitable.bridge.setData("api_key", API_KEY_CLEARED_MARKER);
     return;
   } else {
     api_key_disabled.value = true;
-    await bitable.bridge.setData("api_key", api_key.value);
+    api_key.value = normalizedKey;
+    await bitable.bridge.setData("api_key", normalizedKey);
     ElMessage({
       message: "保存成功",
       type: "success",
@@ -103,7 +145,7 @@ const resetParams = () => {
 };
 
 // 写入数据: 新建表格
-const createAndWriteData = async (list, type, task_id) => {
+const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
   if (!list) {
     ElMessage({
       message: "获取数据异常，请稍后重试",
@@ -132,7 +174,7 @@ const createAndWriteData = async (list, type, task_id) => {
     ];
     // console.log("🚀 ~ createAndWriteData ~ fields:", fields)
     // 创建表格，创建表格中的字段
-    if (!type) { // 第一次请求
+    if (!type && !targetTableId) { // 第一次请求且为新建表格
       let tableName = '';
       // const firstItem = list[0];
       tableName = '社媒评论加载工具';
@@ -160,7 +202,59 @@ const createAndWriteData = async (list, type, task_id) => {
       // console.log(`表格"${tableName}"创建成功，包含${createdFields.length}个字段`);
     }
     // 写入数据
-    const activeTable = await bitable.base.getActiveTable();
+    const activeTable = targetTableId
+      ? await bitable.base.getTableById(targetTableId)
+      : await bitable.base.getActiveTable();
+
+    // 使用现有表格：仅要求存在"文本"字段，其余字段按存在即写入
+    if (targetTableId) {
+      const existingFieldMap = new Map();
+      for (const config of EXISTING_TABLE_WRITE_MAPPING) {
+        try {
+          const field = await activeTable.getField(config.name);
+          if (field) {
+            existingFieldMap.set(config.name, field);
+          }
+        } catch (error) {
+          // 字段不存在时 getField 会抛异常，这里按可选字段处理
+          console.warn(`现有表格缺少字段：${config.name}`);
+        }
+      }
+
+      if (!existingFieldMap.has(EXISTING_TABLE_REQUIRED_FIELD)) {
+        showErrorMsg(`所选表格缺少必需字段：${EXISTING_TABLE_REQUIRED_FIELD}`);
+        resetParams();
+        return;
+      }
+
+      const availableMappings = EXISTING_TABLE_WRITE_MAPPING.filter(config => existingFieldMap.has(config.name));
+      if (availableMappings.length === 0) {
+        showErrorMsg("所选表格没有可写入字段");
+        resetParams();
+        return;
+      }
+
+      const records = [];
+      for (const item of list) {
+        const record = [];
+        for (const config of availableMappings) {
+          const field = existingFieldMap.get(config.name);
+          record.push(await field.createCell(config.getValue(item)));
+        }
+        records.push(record);
+      }
+      await activeTable.addRecords(records);
+
+      if (total > page) {
+        page += 1;
+        getList(task_id, 'next', targetTableId);
+        return;
+      } else {
+        resetParams();
+      }
+      return;
+    }
+
     // console.log("🚀 ~ createAndWriteData ~ activeTable:", activeTable, fields)
     const fieldList = [];
     for (const config of fields) {
@@ -191,7 +285,7 @@ const createAndWriteData = async (list, type, task_id) => {
 
     if (total > page) {
       page += 1;
-      getList(task_id, 'next');
+      getList(task_id, 'next', targetTableId);
       return;
     } else {
       resetParams();
@@ -262,13 +356,22 @@ const showErrorMsg = (message) => {
   });
 };
 
+const getValidApiKey = () => {
+  const normalizedKey = String(api_key.value || "").trim();
+  if (!normalizedKey || normalizedKey === API_KEY_CLEARED_MARKER) {
+    return "";
+  }
+  return normalizedKey;
+};
+
 // 主页 提交任务
-const postNoteTask = async () => {
+const postNoteTask = async (targetTableId = "") => {
+  const validApiKey = getValidApiKey();
   await request({
     url: "/social/api/v1/feishu/comment/task",
     method: "post",
     headers: {
-      'authorization': `Bearer ${api_key.value}`,
+      'authorization': `Bearer ${validApiKey}`,
     },
     data: {
       url: formData.value.url,
@@ -281,7 +384,7 @@ const postNoteTask = async () => {
       let res = response.data;
       if (res.sta == 0) {
         const data = res.data;
-        getNoteTaskInterval(data.task_id);
+        getNoteTaskInterval(data.task_id, targetTableId);
       } else {
         loading.value = false;
         showErrorMsg(res.msg);
@@ -300,18 +403,18 @@ const closeNoteInterval = () => {
 };
 
 // 主页 轮询获取任务状态
-const getNoteTaskInterval = (task_id) => {
+const getNoteTaskInterval = (task_id, targetTableId = "") => {
   const requestFn = () => {
     let time = 0;
     closeNoteInterval();
     note_timer = setInterval(() => {
       time += 3;
-      if (time >= 600) {
+        if (time >= 600) {
         closeNoteInterval();
         showErrorMsg("获取数据超时，请稍后重试");
         loading.value = false;
-      } else {
-        getNoteTask(task_id);
+        } else {
+        getNoteTask(task_id, targetTableId);
       }
     }, 3000)
   }
@@ -319,12 +422,13 @@ const getNoteTaskInterval = (task_id) => {
 };
 
 // 主页 获取任务状态
-const getNoteTask = async (task_id) => {
+const getNoteTask = async (task_id, targetTableId = "") => {
+  const validApiKey = getValidApiKey();
   await request({
     url: "/social/api/v1/feishu/comment/task?task_id=" + task_id,
     method: "get",
     headers: {
-      'authorization': `Bearer ${api_key.value}`,
+      'authorization': `Bearer ${validApiKey}`,
     },
   })
     .then(function (response) {
@@ -336,7 +440,7 @@ const getNoteTask = async (task_id) => {
         } else if (status == 1) { // 成功
           closeNoteInterval();
           page = 1;
-          getList(task_id);
+          getList(task_id, "", targetTableId);
         } else if (status == 2) { // 失败
           closeNoteInterval();
           showErrorMsg("获取数据失败，请稍后重试");
@@ -350,12 +454,13 @@ const getNoteTask = async (task_id) => {
 }
 
 // 获取帖子列表
-const getList = async (task_id, type) => {
+const getList = async (task_id, type, targetTableId = "") => {
+  const validApiKey = getValidApiKey();
   await request({
     url: "/social/api/v1/feishu/comment/list",
     method: "post",
     headers: {
-      'authorization': `Bearer ${api_key.value}`,
+      'authorization': `Bearer ${validApiKey}`,
     },
     data: {
       task_id: task_id,
@@ -369,9 +474,9 @@ const getList = async (task_id, type) => {
         const { count, data } = res.data;
         if (!type) { // 第一次请求
           total = Math.ceil(count / page_size);
-          createAndWriteData(data, '', task_id);
+          createAndWriteData(data, '', task_id, targetTableId);
         } else if (type == 'next') {
-          createAndWriteData(data, type, task_id);
+          createAndWriteData(data, type, task_id, targetTableId);
         }
       } else {
         loading.value = false;
@@ -386,17 +491,18 @@ const getList = async (task_id, type) => {
 };
 
 // 主页数据
-const getNoteData = async () => {
+const getNoteData = async (targetTableId = "") => {
   // 新建表格，表格中第一个字段为视频编号
   // createAndWriteData([]);
   // return;
   loading.value = true;
-  await postNoteTask();
+  await postNoteTask(targetTableId);
 };
 
 const commit = () => {
   if (loading.value) return;
-  if (!api_key.value) {
+  const validApiKey = getValidApiKey();
+  if (!validApiKey) {
     showErrorMsg("请输入API key");
     return;
   }
@@ -405,7 +511,12 @@ const commit = () => {
     showErrorMsg("请输入帖子链接");
     return;
   }
-  getNoteData();
+  if (formData.value.radio === 2 && !formData.value.table_id) {
+    showErrorMsg("请选择现有表格");
+    return;
+  }
+  const targetTableId = formData.value.radio === 2 ? String(formData.value.table_id || "") : "";
+  getNoteData(targetTableId);
   //
   bitable.bridge.setData("note_url", formData.value.url);
   // bitable.bridge.setData("note_platform", formData.value.social_type);
@@ -437,8 +548,14 @@ const commit = () => {
       <el-form-item label="" style="margin-top: 12px">
         <el-radio-group v-model="formData.radio">
           <el-radio :value="1">新建表格</el-radio>
-          <el-radio :value="2" :disabled="true">使用现有表格</el-radio>
+          <el-radio :value="2">使用现有表格</el-radio>
         </el-radio-group>
+      </el-form-item>
+      <el-form-item v-if="formData.radio === 2" label="">
+        <div slot="label" class="c-label">选择现有表格</div>
+        <el-select v-model="formData.table_id" placeholder="请选择" style="width: 100%">
+          <el-option v-for="tl in table_options" :key="tl.id" :label="tl.name" :value="tl.id" />
+        </el-select>
       </el-form-item>
       <el-form-item>
         <div slot="label" class="c-label">
