@@ -506,21 +506,93 @@ const commit = () => {
     showErrorMsg("请输入API key");
     return;
   }
-  const { url } = formData.value;
+  // const { url } = formData.value;
+  const { url, radio, table_id } = formData.value;
   if (!String(url)) {
     showErrorMsg("请输入帖子链接");
     return;
   }
-  if (formData.value.radio === 2 && !formData.value.table_id) {
+  if (radio === 2 && !table_id) {
     showErrorMsg("请选择现有表格");
     return;
   }
-  const targetTableId = formData.value.radio === 2 ? String(formData.value.table_id || "") : "";
-  getNoteData(targetTableId);
+
+  // 如果是使用现有表格，验证表格字段
+  if (radio === 2) {
+    validateTableFields(table_id).then(isValid => {
+      if (isValid) {
+        getNoteData(table_id);
+      }
+    }).catch(error => {
+      console.error("验证表格字段时出错:", error);
+      showErrorMsg("验证表格字段失败，请稍后重试");
+    });
+    return;
+  }
+
+  // const targetTableId = formData.value.radio === 2 ? String(formData.value.table_id || "") : "";
+  getNoteData();
   //
   bitable.bridge.setData("note_url", formData.value.url);
   // bitable.bridge.setData("note_platform", formData.value.social_type);
 
+};
+
+// 验证表格字段
+const validateTableFields = async (tableId) => {
+  try {
+    const activeTable = await bitable.base.getTableById(tableId);
+    const fieldMetaList = await activeTable.getFieldMetaList();
+    const fieldIdByName = new Map(fieldMetaList.map(meta => [meta.name, meta.id]));
+    
+    // 定义字段类型映射关系
+    const FIELD_TYPE_MAP = {
+      "文本": FieldType.Text,
+      "头像": FieldType.Text,
+      "昵称": FieldType.Text,
+      "IP地址": FieldType.Text,
+      "评论时间": FieldType.DateTime,
+    };
+
+    // 检查必需字段是否存在
+    if (!fieldIdByName.has(EXISTING_TABLE_REQUIRED_FIELD)) {
+      showErrorMsg(`所选表格缺少必需字段：${EXISTING_TABLE_REQUIRED_FIELD}`);
+      return false;
+    }
+
+    // 检查每个映射字段的类型是否匹配
+    for (const config of EXISTING_TABLE_WRITE_MAPPING) {
+      const fieldId = fieldIdByName.get(config.name);
+      
+      // 如果字段不存在，跳过类型检查（因为这是可选字段）
+      if (!fieldId) {
+        continue;
+      }
+      
+      // 获取字段元数据
+      const fieldMeta = fieldMetaList.find(meta => meta.id === fieldId);
+      
+      // 验证字段类型是否匹配
+      const expectedType = FIELD_TYPE_MAP[config.name];
+      if (expectedType && fieldMeta.type !== expectedType) {
+        showErrorMsg(`所选表格中 "${config.name}" 字段的类型不正确`);
+        return false;
+      }
+    }
+    
+    // 检查是否有至少一个可用的映射字段
+    const availableMappings = EXISTING_TABLE_WRITE_MAPPING.filter(config => fieldIdByName.has(config.name));
+    if (availableMappings.length === 0) {
+      showErrorMsg("所选表格没有可写入字段");
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error("验证表格字段时出错:", error);
+    showErrorMsg("验证表格字段失败，请稍后重试");
+    return false;
+  }
 };
 
 </script>
