@@ -1,5 +1,5 @@
 <script setup>
-import { bitable, FieldType } from "@lark-base-open/js-sdk";
+import { bitable, FieldType, NumberFormatter } from "@lark-base-open/js-sdk";
 import { ref, onMounted, onUnmounted, watch } from "vue";
 import request from '@/utils/request'
 
@@ -13,21 +13,70 @@ const formData = ref({
   radio: 1, url: "",
   // social_type: "xhs",
   pages: 1,
+  reply_pages: -1,
   table_id: "",
 });
 const table_options = ref([]);
-const EXISTING_TABLE_REQUIRED_FIELD = "文本";
-const EXISTING_TABLE_WRITE_MAPPING = [
-  { name: "文本", getValue: (item) => item?.text ?? "" },
-  { name: "头像", getValue: (item) => item?.avatar ?? "" },
-  { name: "昵称", getValue: (item) => item?.nickname ?? "" },
-  { name: "IP地址", getValue: (item) => item?.ip_label ?? "" },
-  { name: "评论时间", getValue: (item) => (item?.t_create ? item.t_create * 1000 : "") },
+const EXISTING_TABLE_REQUIRED_FIELD = "评论ID";
+const FIELD_CONFIG = [
+  { name: "评论ID", type: FieldType.Text, getValue: (item) => item?.cid ?? "" },
+  { name: "上级评论ID", type: FieldType.Text, getValue: (item) => item?.reply_id ?? "" },
+  { name: "作品ID", type: FieldType.Text, getValue: (item) => item?.note_id ?? "" },
+  { name: "评论内容", type: FieldType.Text, getValue: (item) => item?.text ?? "" },
+  { name: "作者名称", type: FieldType.Text, getValue: (item) => item?.nickname ?? "" },
+  { name: "作者ID", type: FieldType.Text, getValue: (item) => item?.uid ?? "" },
+  { name: "小红书ID", type: FieldType.Text, getValue: (item) => item?.social_user_number ?? "" },
+  { name: "点赞数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.digg_count) || 0 },
+  { name: "回复数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.reply_comment_total) || 0 },
+  { name: "评论时间", type: FieldType.DateTime, getValue: (item) => (item?.t_create ? item.t_create * 1000 : "") },
 ];
+// 字段类型名称映射
+const FIELD_TYPE_NAME = {
+  [FieldType.Text]: 'Text',
+  [FieldType.Number]: 'Number',
+  [FieldType.DateTime]: 'DateTime',
+  [FieldType.Url]: 'Url',
+  [FieldType.Attachment]: 'Attachment',
+};
+
+const reply_pages_options = ref([
+  {
+    value: -1,
+    label: "不获取",
+  },
+  {
+    value: 0,
+    label: "获取全部",
+  },
+  {
+    value: 1,
+    label: "仅获取首页",
+  },
+  {
+    value: 5,
+    label: "获取前5页",
+  },
+  {
+    value: 10,
+    label: "获取前10页",
+  },
+  {
+    value: 20,
+    label: "获取前20页",
+  },
+  {
+    value: 30,
+    label: "获取前30页",
+  },
+  {
+    value: 50,
+    label: "获取前50页",
+  },
+]);
 const pages_options = ref([
   {
     value: 0,
-    label: "全量获取",
+    label: "获取全部",
   },
   {
     value: 1,
@@ -165,13 +214,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
     return;
   }
   try {
-    const fields = [
-      { type: FieldType.Text, name: "文本" },
-      { type: FieldType.Text, name: "头像" },
-      { type: FieldType.Text, name: "昵称" },
-      { type: FieldType.Text, name: "IP地址" },
-      { type: FieldType.DateTime, name: "评论时间" },
-    ];
+    const fields = FIELD_CONFIG.map(({ name, type, formatter }) => formatter ? { name, type, formatter } : { name, type });
     // console.log("🚀 ~ createAndWriteData ~ fields:", fields)
     // 创建表格，创建表格中的字段
     if (!type && !targetTableId) { // 第一次请求且为新建表格
@@ -184,21 +227,15 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
       const newTable = await bitable.base.getTable(tableId);
       // console.log("🚀 ~ createAndWriteData ~ newTable:", newTable)
       await bitable.ui.switchToTable(tableId);
-      // 修改表格中第一个字段
-      const first_field = await newTable.getField('文本');
-      // 批量添加字段（并行处理提高效率）
-      const fieldPromises = fields.map((config, index) => {
-        if (index === 0 && first_field) {
-          return newTable.setField(first_field.id, {
-            ...config,
-          })
-        }
-        return newTable.addField({
-          ...config,
-        })
+      // 修改表格中第一个字段为"评论ID"，再添加其余字段
+      const fieldMetaList = await newTable.getFieldMetaList();
+      const firstFieldId = fieldMetaList[0]?.id;
+      if (firstFieldId) {
+        await newTable.setField(firstFieldId, { ...fields[0] });
       }
-      );
-      const createdFields = await Promise.all(fieldPromises);
+      for (let i = 1; i < fields.length; i++) {
+        await newTable.addField({ ...fields[i] });
+      }
       // console.log(`表格"${tableName}"创建成功，包含${createdFields.length}个字段`);
     }
     // 写入数据
@@ -209,7 +246,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
     // 使用现有表格：仅要求存在"文本"字段，其余字段按存在即写入
     if (targetTableId) {
       const existingFieldMap = new Map();
-      for (const config of EXISTING_TABLE_WRITE_MAPPING) {
+      for (const config of FIELD_CONFIG) {
         try {
           const field = await activeTable.getField(config.name);
           if (field) {
@@ -222,17 +259,30 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
       }
 
       if (!existingFieldMap.has(EXISTING_TABLE_REQUIRED_FIELD)) {
-        showErrorMsg(`所选表格缺少必需字段：${EXISTING_TABLE_REQUIRED_FIELD}`);
+        // showErrorMsg(`所选表格缺少必需字段：${EXISTING_TABLE_REQUIRED_FIELD}`);
+        ElNotification({ title: '出错', message: `主字段"评论ID"不存在于现有表格中，无法写入数据。请确保表格中包含该字段。`, type: 'error', duration: 0 });
         resetParams();
         return;
       }
 
-      const availableMappings = EXISTING_TABLE_WRITE_MAPPING.filter(config => existingFieldMap.has(config.name));
+      const availableMappings = FIELD_CONFIG.filter(config => existingFieldMap.has(config.name));
       if (availableMappings.length === 0) {
         showErrorMsg("所选表格没有可写入字段");
         resetParams();
         return;
       }
+
+      // 为 Number 类型字段设置整型格式
+      // const NUMBER_FIELDS = ["点赞数", "回复数"];
+      // for (const name of NUMBER_FIELDS) {
+      //   if (existingFieldMap.has(name)) {
+      //     try {
+      //       await existingFieldMap.get(name).setFormatter(NumberFormatter.INTEGER);
+      //     } catch (e) {
+      //       console.warn(`设置字段格式失败：${name}`, e);
+      //     }
+      //   }
+      // }
 
       const records = [];
       for (const item of list) {
@@ -272,11 +322,10 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
     let records = [];
     for (const item of list) {
       let record = [];
-      record.push(await fieldList[0].createCell(item.text));
-      record.push(await fieldList[1].createCell(item.avatar));
-      record.push(await fieldList[2].createCell(item.nickname));
-      record.push(await fieldList[3].createCell(item.ip_label));
-      record.push(await fieldList[4].createCell(item.t_create ? item.t_create * 1000 : ''));
+      for (let i = 0; i < fields.length; i++) {
+        const mapping = FIELD_CONFIG[i];
+        record.push(await fieldList[i].createCell(mapping.getValue(item)));
+      }
       records.push(record);
     }
     // 写入记录
@@ -377,6 +426,7 @@ const postNoteTask = async (targetTableId = "") => {
       url: formData.value.url,
       // social_type: formData.value.social_type,
       pages: Number(formData.value.pages),
+      reply_pages: Number(formData.value.reply_pages),
     },
   })
     .then(function (response) {
@@ -480,7 +530,8 @@ const getList = async (task_id, type, targetTableId = "") => {
         }
       } else {
         loading.value = false;
-        showErrorMsg(res.msg);
+        ElNotification({ title: '错误', message: res.msg, type: 'error', duration: 0 });
+        // showErrorMsg(res.msg);
       }
     })
     .catch(function (error) {
@@ -544,24 +595,16 @@ const validateTableFields = async (tableId) => {
     const activeTable = await bitable.base.getTableById(tableId);
     const fieldMetaList = await activeTable.getFieldMetaList();
     const fieldIdByName = new Map(fieldMetaList.map(meta => [meta.name, meta.id]));
-    
-    // 定义字段类型映射关系
-    const FIELD_TYPE_MAP = {
-      "文本": FieldType.Text,
-      "头像": FieldType.Text,
-      "昵称": FieldType.Text,
-      "IP地址": FieldType.Text,
-      "评论时间": FieldType.DateTime,
-    };
 
     // 检查必需字段是否存在
     if (!fieldIdByName.has(EXISTING_TABLE_REQUIRED_FIELD)) {
-      showErrorMsg(`所选表格缺少必需字段：${EXISTING_TABLE_REQUIRED_FIELD}`);
+      // showErrorMsg(`所选表格缺少必需字段：${EXISTING_TABLE_REQUIRED_FIELD}`);
+      ElNotification({ title: '出错', message: `主字段"评论ID"不存在于现有表格中，无法写入数据。请确保表格中包含该字段。`, type: 'error', duration: 0 });
       return false;
     }
 
     // 检查每个映射字段的类型是否匹配
-    for (const config of EXISTING_TABLE_WRITE_MAPPING) {
+    for (const config of FIELD_CONFIG) {
       const fieldId = fieldIdByName.get(config.name);
       
       // 如果字段不存在，跳过类型检查（因为这是可选字段）
@@ -573,15 +616,16 @@ const validateTableFields = async (tableId) => {
       const fieldMeta = fieldMetaList.find(meta => meta.id === fieldId);
       
       // 验证字段类型是否匹配
-      const expectedType = FIELD_TYPE_MAP[config.name];
+      const expectedType = config.type;
       if (expectedType && fieldMeta.type !== expectedType) {
-        showErrorMsg(`所选表格中 "${config.name}" 字段的类型不正确`);
+        // showErrorMsg(`所选表格中 "${config.name}" 字段的类型不正确`);
+        ElNotification({ title: '出错', message: `字段类型不匹配:字段"${config.name}" 的类型是 ${FIELD_TYPE_NAME[fieldMeta.type] || fieldMeta.type}，但Schema定义为 ${FIELD_TYPE_NAME[expectedType] || expectedType}，无法写入数据`, type: 'error', duration: 0 });
         return false;
       }
     }
     
     // 检查是否有至少一个可用的映射字段
-    const availableMappings = EXISTING_TABLE_WRITE_MAPPING.filter(config => fieldIdByName.has(config.name));
+    const availableMappings = FIELD_CONFIG.filter(config => fieldIdByName.has(config.name));
     if (availableMappings.length === 0) {
       showErrorMsg("所选表格没有可写入字段");
       return false;
@@ -655,15 +699,21 @@ const validateTableFields = async (tableId) => {
       </el-form-item> -->
       <el-form-item label="">
         <div slot="label" class="c-label">
-          数据提取范围
+          主评论数据提取范围
           <el-tooltip effect="dark" placement="top">
-            <template #content>每页 50 积分，实际扣费会按照<br />提取的页数进行计算</template>
+            <template #content>每页 10 积分，实际扣费会按照<br />提取的页数进行计算</template>
             <img src="https://cdn.zhinizhushou.com/material/20250826/45c287c837d7c34626a8f441264db162.png"
               class="help-icon" />
           </el-tooltip>
         </div>
         <el-select v-model="formData.pages" placeholder="请选择" style="width: 100%">
           <el-option v-for="tl in pages_options" :key="tl.value" :label="tl.label" :value="tl.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="">
+        <div slot="label" class="c-label">子评论提取范围</div>
+        <el-select v-model="formData.reply_pages" placeholder="请选择" style="width: 100%">
+          <el-option v-for="tl in reply_pages_options" :key="tl.value" :label="tl.label" :value="tl.value" />
         </el-select>
       </el-form-item>
     </el-form>
