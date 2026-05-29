@@ -28,6 +28,7 @@ const FIELD_CONFIG = [
   { name: "小红书ID", type: FieldType.Text, getValue: (item) => item?.social_user_number ?? "" },
   { name: "点赞数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.digg_count) || 0 },
   { name: "回复数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.reply_comment_total) || 0 },
+  { name: "平台", type: FieldType.Text, getValue: (item) => item?.social_type ?? "" },
   { name: "评论时间", type: FieldType.DateTime, getValue: (item) => (item?.t_create ? item.t_create * 1000 : "") },
 ];
 // 字段类型名称映射
@@ -416,6 +417,7 @@ const getValidApiKey = () => {
 // 主页 提交任务
 const postNoteTask = async (targetTableId = "") => {
   const validApiKey = getValidApiKey();
+  const normalizedUrl = String(formData.value.url || "").trim();
   await request({
     url: "/social/api/v1/feishu/comment/task",
     method: "post",
@@ -423,7 +425,7 @@ const postNoteTask = async (targetTableId = "") => {
       'authorization': `Bearer ${validApiKey}`,
     },
     data: {
-      url: formData.value.url,
+      url: normalizedUrl,
       // social_type: formData.value.social_type,
       pages: Number(formData.value.pages),
       reply_pages: Number(formData.value.reply_pages),
@@ -559,7 +561,7 @@ const commit = () => {
   }
   // const { url } = formData.value;
   const { url, radio, table_id } = formData.value;
-  if (!String(url)) {
+  if (!String(url || "").trim()) {
     showErrorMsg("请输入帖子链接");
     return;
   }
@@ -677,12 +679,19 @@ const validateTableFields = async (tableId) => {
         <div slot="label" class="c-label">
           帖子链接
           <el-tooltip effect="dark" placement="top">
-            <template #content>帖子链接</template>
+            <template #content>支持单个或多个帖子链接，可用换行、英文逗号或中文逗号分隔</template>
             <img src="https://cdn.zhinizhushou.com/material/20250826/45c287c837d7c34626a8f441264db162.png"
               class="help-icon" />
           </el-tooltip>
         </div>
-        <el-input v-model="formData.url" class="c-input" placeholder="" />
+        <el-input
+          v-model="formData.url"
+          type="textarea"
+          :rows="4"
+          resize="none"
+          class="c-input"
+          placeholder="请输入帖子链接，支持换行或逗号分隔"
+        />
       </el-form-item>
       <!-- <el-form-item label="">
         <div slot="label" class="c-label">
