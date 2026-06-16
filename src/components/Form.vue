@@ -35,9 +35,31 @@ const FIELD_CONFIG = [
 const FIELD_TYPE_NAME = {
   [FieldType.Text]: 'Text',
   [FieldType.Number]: 'Number',
+  [FieldType.SingleSelect]: 'SingleSelect',
   [FieldType.DateTime]: 'DateTime',
   [FieldType.Url]: 'Url',
   [FieldType.Attachment]: 'Attachment',
+};
+
+const SINGLE_SELECT_COMPATIBLE_FIELDS = new Set(["作者名称", "平台"]);
+
+const getAllowedFieldTypes = (config) => {
+  if (SINGLE_SELECT_COMPATIBLE_FIELDS.has(config.name)) {
+    return [FieldType.Text, FieldType.SingleSelect];
+  }
+  return [config.type];
+};
+
+const isFieldTypeCompatible = (fieldType, config) => {
+  return getAllowedFieldTypes(config).includes(fieldType);
+};
+
+const getFieldWriteValue = (config, item, fieldType) => {
+  const value = config.getValue(item);
+  if (SINGLE_SELECT_COMPATIBLE_FIELDS.has(config.name) && fieldType === FieldType.SingleSelect) {
+    return value || null;
+  }
+  return value;
 };
 
 const reply_pages_options = ref([
@@ -290,7 +312,8 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
         const record = [];
         for (const config of availableMappings) {
           const field = existingFieldMap.get(config.name);
-          record.push(await field.createCell(config.getValue(item)));
+          const fieldType = await field.getType();
+          record.push(await field.createCell(getFieldWriteValue(config, item, fieldType)));
         }
         records.push(record);
       }
@@ -325,7 +348,8 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
       let record = [];
       for (let i = 0; i < fields.length; i++) {
         const mapping = FIELD_CONFIG[i];
-        record.push(await fieldList[i].createCell(mapping.getValue(item)));
+        const fieldType = await fieldList[i].getType();
+        record.push(await fieldList[i].createCell(getFieldWriteValue(mapping, item, fieldType)));
       }
       records.push(record);
     }
@@ -618,10 +642,11 @@ const validateTableFields = async (tableId) => {
       const fieldMeta = fieldMetaList.find(meta => meta.id === fieldId);
       
       // 验证字段类型是否匹配
-      const expectedType = config.type;
-      if (expectedType && fieldMeta.type !== expectedType) {
+      const allowedTypes = getAllowedFieldTypes(config);
+      if (config.type && !isFieldTypeCompatible(fieldMeta.type, config)) {
         // showErrorMsg(`所选表格中 "${config.name}" 字段的类型不正确`);
-        ElNotification({ title: '出错', message: `字段类型不匹配:字段"${config.name}" 的类型是 ${FIELD_TYPE_NAME[fieldMeta.type] || fieldMeta.type}，但Schema定义为 ${FIELD_TYPE_NAME[expectedType] || expectedType}，无法写入数据`, type: 'error', duration: 0 });
+        const expectedTypesText = allowedTypes.map(type => FIELD_TYPE_NAME[type] || type).join(" / ");
+        ElNotification({ title: '出错', message: `字段类型不匹配:字段"${config.name}" 的类型是 ${FIELD_TYPE_NAME[fieldMeta.type] || fieldMeta.type}，仅支持 ${expectedTypesText}，无法写入数据`, type: 'error', duration: 0 });
         return false;
       }
     }
