@@ -1,5 +1,5 @@
 <script setup>
-import { bitable, FieldType, NumberFormatter } from "@lark-base-open/js-sdk";
+import { bitable, DateFormatter, FieldType, NumberFormatter } from "@lark-base-open/js-sdk";
 import { ref, onMounted, onUnmounted, watch } from "vue";
 import request from '@/utils/request'
 
@@ -18,19 +18,26 @@ const formData = ref({
 });
 const table_options = ref([]);
 const EXISTING_TABLE_REQUIRED_FIELD = "评论ID";
+const FIELD_SELECTION_STORAGE_KEY = 'comment_fetch_selected_fields_v1';
 const FIELD_CONFIG = [
-  { name: "评论ID", type: FieldType.Text, getValue: (item) => item?.cid ?? "" },
-  { name: "上级评论ID", type: FieldType.Text, getValue: (item) => item?.reply_id ?? "" },
-  { name: "作品ID", type: FieldType.Text, getValue: (item) => item?.note_id ?? "" },
-  { name: "评论内容", type: FieldType.Text, getValue: (item) => item?.text ?? "" },
-  { name: "作者名称", type: FieldType.Text, getValue: (item) => item?.nickname ?? "" },
-  { name: "作者ID", type: FieldType.Text, getValue: (item) => item?.uid ?? "" },
-  { name: "小红书ID", type: FieldType.Text, getValue: (item) => item?.social_user_number ?? "" },
-  { name: "点赞数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.digg_count) || 0 },
-  { name: "回复数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.reply_comment_total) || 0 },
-  { name: "平台", type: FieldType.Text, getValue: (item) => item?.social_type ?? "" },
-  { name: "评论时间", type: FieldType.DateTime, getValue: (item) => (item?.t_create ? item.t_create * 1000 : "") },
+  { key: "cid", name: "评论ID", type: FieldType.Text, required: true, getValue: (item) => item?.cid ?? "" },
+  { key: "reply_id", name: "上级评论ID", type: FieldType.Text, getValue: (item) => item?.reply_id ?? "" },
+  { key: "note_id", name: "作品ID", type: FieldType.Text, getValue: (item) => item?.note_id ?? "" },
+  { key: "note_url", name: "作品链接", legacyNames: ["视频链接"], type: FieldType.Url, getValue: (item) => item?.note_url ?? "" },
+  { key: "social_type", name: "平台", type: FieldType.Text, getValue: (item) => item?.social_type ?? "" },
+  { key: "text", name: "评论内容", type: FieldType.Text, getValue: (item) => item?.text ?? "" },
+  { key: "nickname", name: "评论者名称", legacyNames: ["作者名称"], type: FieldType.Text, getValue: (item) => item?.nickname ?? "" },
+  { key: "social_user_number", name: "评论者账号", legacyNames: ["小红书ID"], type: FieldType.Text, getValue: (item) => item?.social_user_number ?? "" },
+  { key: "uid", name: "评论者ID", legacyNames: ["作者ID"], type: FieldType.Text, getValue: (item) => item?.uid ?? "" },
+  { key: "profile_url", name: "评论者主页链接", legacyNames: ["作者主页链接"], type: FieldType.Url, getValue: (item) => item?.profile_url ?? "" },
+  { key: "avatar", name: "评论者头像", type: FieldType.Text, getValue: (item) => item?.avatar ?? "" },
+  { key: "ip_label", name: "IP属地", type: FieldType.Text, getValue: (item) => item?.ip_label ?? "" },
+  { key: "digg_count", name: "点赞数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.digg_count) || 0 },
+  { key: "reply_comment_total", name: "回复数", type: FieldType.Number, formatter: NumberFormatter.INTEGER, getValue: (item) => Number(item?.reply_comment_total) || 0 },
+  { key: "t_create", name: "评论时间", type: FieldType.DateTime, dateFormat: DateFormatter.DATE_TIME, getValue: (item) => (item?.t_create ? item.t_create * 1000 : "") },
 ];
+const selectedFieldKeys = ref([]);
+const fieldSelectionReady = ref(false);
 // 字段类型名称映射
 const FIELD_TYPE_NAME = {
   [FieldType.Text]: 'Text',
@@ -41,7 +48,7 @@ const FIELD_TYPE_NAME = {
   [FieldType.Attachment]: 'Attachment',
 };
 
-const SINGLE_SELECT_COMPATIBLE_FIELDS = new Set(["作者名称", "平台"]);
+const SINGLE_SELECT_COMPATIBLE_FIELDS = new Set(["评论者名称", "平台"]);
 
 const getAllowedFieldTypes = (config) => {
   if (SINGLE_SELECT_COMPATIBLE_FIELDS.has(config.name)) {
@@ -138,11 +145,17 @@ const pages_options = ref([
 // ]);
 
 const loading = ref(false);
+const toastVisible = ref(false);
+const toastText = ref('');
+const toastLoading = ref(false);
+let toastTimer = null;
 let page = 1;
 const page_size = 20;
 let total = 0;
 
 onMounted(async () => {
+  await loadSelectedFieldKeys();
+  fieldSelectionReady.value = true;
   const key = await bitable.bridge.getData("api_key");
   // 只有 key 非空且为字符串且不是清除标记时才使用
   if (key && typeof key === "string" && key.trim() && key.trim() !== API_KEY_CLEARED_MARKER) {
@@ -188,7 +201,44 @@ watch(
 
 onUnmounted(() => {
   closeNoteInterval();
+  if (toastTimer) clearTimeout(toastTimer);
 });
+
+const getDefaultSelectedFieldKeys = () => FIELD_CONFIG.map(field => field.key);
+
+const getActiveFieldConfigs = () => {
+  const selectedKeys = new Set(selectedFieldKeys.value);
+  return FIELD_CONFIG.filter(field => field.required || selectedKeys.has(field.key));
+};
+
+const loadSelectedFieldKeys = async () => {
+  const defaultKeys = getDefaultSelectedFieldKeys();
+  try {
+    const savedKeys = await bitable.bridge.getData(FIELD_SELECTION_STORAGE_KEY);
+    const validKeys = Array.isArray(savedKeys)
+      ? savedKeys.filter(key => FIELD_CONFIG.some(field => field.key === key))
+      : defaultKeys;
+    selectedFieldKeys.value = Array.from(new Set([
+      ...validKeys,
+      ...FIELD_CONFIG.filter(field => field.required).map(field => field.key),
+    ]));
+  } catch (error) {
+    console.error('读取字段勾选状态失败:', error);
+    selectedFieldKeys.value = defaultKeys;
+  }
+};
+
+const showToast = (text, isLoading = true) => {
+  if (toastTimer) clearTimeout(toastTimer);
+  toastText.value = text;
+  toastLoading.value = isLoading;
+  toastVisible.value = true;
+};
+
+const showCompletionToast = (text) => {
+  showToast(text, false);
+  toastTimer = setTimeout(() => { toastVisible.value = false; }, 3000);
+};
 
 const saveApiKey = async () => {
   const normalizedKey = String(api_key.value || "").trim();
@@ -237,7 +287,13 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
     return;
   }
   try {
-    const fields = FIELD_CONFIG.map(({ name, type, formatter }) => formatter ? { name, type, formatter } : { name, type });
+    const activeFieldConfigs = getActiveFieldConfigs();
+    const fields = activeFieldConfigs.map(({ name, type, formatter, dateFormat }) => {
+      const field = { name, type };
+      if (formatter) field.formatter = formatter;
+      if (dateFormat) field.dateFormat = dateFormat;
+      return field;
+    });
     // console.log("🚀 ~ createAndWriteData ~ fields:", fields)
     // 创建表格，创建表格中的字段
     if (!type && !targetTableId) { // 第一次请求且为新建表格
@@ -269,14 +325,22 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
     // 使用现有表格：仅要求存在"文本"字段，其余字段按存在即写入
     if (targetTableId) {
       const existingFieldMap = new Map();
-      for (const config of FIELD_CONFIG) {
+      for (const config of activeFieldConfigs) {
         try {
-          const field = await activeTable.getField(config.name);
+          let field;
+          for (const name of [config.name, ...(config.legacyNames || [])]) {
+            try {
+              field = await activeTable.getField(name);
+              if (field) break;
+            } catch (error) {
+              // Continue with the next compatible legacy field name.
+            }
+          }
           if (field) {
             existingFieldMap.set(config.name, field);
           }
         } catch (error) {
-          // 字段不存在时 getField 会抛异常，这里按可选字段处理
+          // 字段不存在时按可选字段处理
           console.warn(`现有表格缺少字段：${config.name}`);
         }
       }
@@ -288,7 +352,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
         return;
       }
 
-      const availableMappings = FIELD_CONFIG.filter(config => existingFieldMap.has(config.name));
+      const availableMappings = activeFieldConfigs.filter(config => existingFieldMap.has(config.name));
       if (availableMappings.length === 0) {
         showErrorMsg("所选表格没有可写入字段");
         resetParams();
@@ -325,6 +389,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
         return;
       } else {
         resetParams();
+        showCompletionToast('评论采集完成');
       }
       return;
     }
@@ -347,7 +412,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
     for (const item of list) {
       let record = [];
       for (let i = 0; i < fields.length; i++) {
-        const mapping = FIELD_CONFIG[i];
+        const mapping = activeFieldConfigs[i];
         const fieldType = await fieldList[i].getType();
         record.push(await fieldList[i].createCell(getFieldWriteValue(mapping, item, fieldType)));
       }
@@ -363,6 +428,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "") => {
       return;
     } else {
       resetParams();
+      showCompletionToast('评论采集完成');
     }
   } catch (error) {
     console.error("🚀 ~ createAndWriteData ~ error:", error)
@@ -573,6 +639,7 @@ const getNoteData = async (targetTableId = "") => {
   // createAndWriteData([]);
   // return;
   loading.value = true;
+  showToast('正在提交评论采集任务...');
   await postNoteTask(targetTableId);
 };
 
@@ -615,6 +682,21 @@ const commit = () => {
 
 };
 
+watch(selectedFieldKeys, async (keys) => {
+  if (!fieldSelectionReady.value) return;
+  const requiredKeys = FIELD_CONFIG.filter(field => field.required).map(field => field.key);
+  const nextKeys = Array.from(new Set([...keys, ...requiredKeys]));
+  if (nextKeys.length !== keys.length) {
+    selectedFieldKeys.value = nextKeys;
+    return;
+  }
+  try {
+    await bitable.bridge.setData(FIELD_SELECTION_STORAGE_KEY, nextKeys);
+  } catch (error) {
+    console.error('保存字段勾选状态失败:', error);
+  }
+}, { deep: true });
+
 // 验证表格字段
 const validateTableFields = async (tableId) => {
   try {
@@ -630,8 +712,10 @@ const validateTableFields = async (tableId) => {
     }
 
     // 检查每个映射字段的类型是否匹配
-    for (const config of FIELD_CONFIG) {
-      const fieldId = fieldIdByName.get(config.name);
+    for (const config of getActiveFieldConfigs()) {
+      const fieldId = [config.name, ...(config.legacyNames || [])]
+        .map(name => fieldIdByName.get(name))
+        .find(Boolean);
       
       // 如果字段不存在，跳过类型检查（因为这是可选字段）
       if (!fieldId) {
@@ -652,7 +736,9 @@ const validateTableFields = async (tableId) => {
     }
     
     // 检查是否有至少一个可用的映射字段
-    const availableMappings = FIELD_CONFIG.filter(config => fieldIdByName.has(config.name));
+    const availableMappings = getActiveFieldConfigs().filter(config =>
+      [config.name, ...(config.legacyNames || [])].some(name => fieldIdByName.has(name))
+    );
     if (availableMappings.length === 0) {
       showErrorMsg("所选表格没有可写入字段");
       return false;
@@ -750,9 +836,30 @@ const validateTableFields = async (tableId) => {
           <el-option v-for="tl in reply_pages_options" :key="tl.value" :label="tl.label" :value="tl.value" />
         </el-select>
       </el-form-item>
+      <el-form-item label="" style="margin-top: 12px">
+        <div slot="label" class="c-label">选择需要的字段</div>
+        <el-checkbox-group v-model="selectedFieldKeys" class="field-checkbox-group">
+          <el-checkbox
+            v-for="field in FIELD_CONFIG"
+            :key="field.key"
+            :label="field.key"
+            :disabled="field.required"
+            class="field-checkbox-item"
+          >
+            {{ field.name }}
+          </el-checkbox>
+        </el-checkbox-group>
+      </el-form-item>
     </el-form>
 
     <el-button color="#a8071a" class="commit-btn" :loading="loading" @click="commit">提交</el-button>
+  </div>
+  <div class="toast-wrap" :class="{ show: toastVisible }">
+    <div class="toast" :class="{ 'toast-loading': toastLoading }">
+      <div class="toast-icon" v-if="toastLoading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 1 10 10" /></svg></div>
+      <div class="toast-icon" v-else><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#00B42A" /><path d="M8 12l2.5 2.5L16 9" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" /></svg></div>
+      <span>{{ toastText }}</span>
+    </div>
   </div>
 </template>
 
@@ -835,5 +942,103 @@ const validateTableFields = async (tableId) => {
   width: 16px;
   height: 16px;
   margin-left: 4px;
+}
+
+.field-checkbox-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  width: 100%;
+}
+
+.field-checkbox-item {
+  margin-right: 0;
+}
+
+.field-checkbox-group :deep(.el-checkbox) {
+  margin-right: 0;
+}
+
+.field-checkbox-group :deep(.el-checkbox__inner) {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border-color: #e5e6eb;
+}
+
+.field-checkbox-group :deep(.el-checkbox:hover .el-checkbox__inner) {
+  border-color: #a8071a;
+}
+
+.field-checkbox-group :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+  background-color: #a8071a;
+  border-color: #a8071a;
+}
+
+.field-checkbox-group :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+  color: #1d2129;
+}
+
+.field-checkbox-group :deep(.el-checkbox__input.is-disabled.is-checked .el-checkbox__inner) {
+  background-color: #f7f8fa;
+  border-color: #e5e6eb;
+}
+
+.field-checkbox-group :deep(.el-checkbox__input.is-disabled.is-checked .el-checkbox__inner::after) {
+  border-color: #c9cdd4;
+}
+
+.toast-wrap {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.95);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.toast-wrap.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  color: #1d2129;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.toast-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.toast-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.toast-loading .toast-icon {
+  color: #a8071a;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
