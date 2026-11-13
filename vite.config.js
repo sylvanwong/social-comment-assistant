@@ -17,6 +17,10 @@ export default defineConfig({
   server: { // 开发服务器配置（仅开发环境生效）
     host: true,
     proxy: {
+      '/socialdatax/api': {
+        target: 'https://test-lotto.weiyoubot.cn',
+        changeOrigin: true,
+      },
       '/social/api': {
         target: 'https://test-lotto.weiyoubot.cn',
         // target: 'https://api.52choujiang.cn',

@@ -2,7 +2,7 @@
 import { resolveWritableField } from "../utils/tableFields.js";
 import { bitable, DateFormatter, FieldType, NumberFormatter } from "@lark-base-open/js-sdk";
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from "vue";
-import request from '@/utils/request'
+import request, { FEISHU_API_BASE_URL } from '@/utils/request'
 import TaskFeedback from './TaskFeedback.vue';
 import { useTaskFeedback } from '../composables/useTaskFeedback.mjs';
 
@@ -540,7 +540,8 @@ const postNoteTask = async (targetTableId = "") => {
   const validApiKey = getValidApiKey();
   const normalizedUrl = String(formData.value.url || "").trim();
   await request({
-    url: "/social/api/v1/feishu/comment/task",
+    baseURL: FEISHU_API_BASE_URL,
+    url: "/socialdatax/api/v1/feishu/comment/task",
     method: "post",
     headers: {
       'authorization': `Bearer ${validApiKey}`,
@@ -607,7 +608,8 @@ const getNoteTask = async (task_id, targetTableId = "") => {
   if (disposed) return;
   const validApiKey = getValidApiKey();
   await request({
-    url: "/social/api/v1/feishu/comment/task?task_id=" + task_id,
+    baseURL: FEISHU_API_BASE_URL,
+    url: "/socialdatax/api/v1/feishu/comment/task?task_id=" + encodeURIComponent(task_id),
     method: "get",
     params: { supports_partial_results: 1 },
     headers: {
@@ -661,7 +663,8 @@ const getList = async (task_id, type, targetTableId = "", taskStatus = 1) => {
   if (disposed) return;
   const validApiKey = getValidApiKey();
   await request({
-    url: "/social/api/v1/feishu/comment/list",
+    baseURL: FEISHU_API_BASE_URL,
+    url: "/socialdatax/api/v1/feishu/comment/list",
     method: "post",
     headers: {
       'authorization': `Bearer ${validApiKey}`,
@@ -749,7 +752,8 @@ const cancelCommentTask = async () => {
   progress(getStoppingText(), { stopping: true });
   try {
     const response = await request({
-      url: '/social/api/v1/feishu/comment/task/cancel', method: 'post',
+      baseURL: FEISHU_API_BASE_URL,
+      url: '/socialdatax/api/v1/feishu/comment/task/cancel', method: 'post',
       headers: { authorization: `Bearer ${getValidApiKey()}` }, data: { task_id: taskId },
     });
     if (response.data?.sta !== 0) throw new Error(response.data?.msg || '停止任务失败');
