@@ -56,6 +56,6 @@ for (const [mode, base] of [['production', 'https://api.socialdatax.com'], ['tes
 test('评论开发代理支持新旧前缀', async () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const { config } = await loadConfigFromFile({ command: 'serve', mode: 'development' }, `${root}/vite.config.js`, root);
-  assert.equal(config.server.proxy['/socialdatax/api'].target, 'https://test-lotto.weiyoubot.cn');
-  assert.equal(config.server.proxy['/social/api'].target, 'https://test-lotto.weiyoubot.cn');
+  assert.equal(config.server.proxy['/socialdatax/api'].target, 'https://api.socialdatax.com');
+  assert.equal(config.server.proxy['/social/api'].target, 'https://api.52choujiang.cn');
 });

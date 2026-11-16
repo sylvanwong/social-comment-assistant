@@ -18,12 +18,11 @@ export default defineConfig({
     host: true,
     proxy: {
       '/socialdatax/api': {
-        target: 'https://test-lotto.weiyoubot.cn',
+        target: 'https://api.socialdatax.com',
         changeOrigin: true,
       },
       '/social/api': {
-        target: 'https://test-lotto.weiyoubot.cn',
-        // target: 'https://api.52choujiang.cn',
+        target: 'https://api.52choujiang.cn',
         changeOrigin: true,
         rewrite: (path) => path
       }
