@@ -31,6 +31,7 @@ for (const [mode, base] of [['production', 'https://api.socialdatax.com'], ['tes
     view.formData.value.url = 'https://example.com/note';
     view.formData.value.pages = 2;
     view.formData.value.reply_pages = -1;
+    view.selectedFieldKeys.value = ['cid', 'text'];
     view.loading.value = true;
     await view.postNoteTask();
     await view.getNoteTask('task/id');
@@ -43,7 +44,7 @@ for (const [mode, base] of [['production', 'https://api.socialdatax.com'], ['tes
       '/socialdatax/api/v1/feishu/comment/list',
     ]);
     assert.ok(calls.every(c => c.baseURL === base && c.headers.authorization === 'Bearer test-only'));
-    assert.deepEqual(calls[0].data, { url: 'https://example.com/note', pages: 2, reply_pages: -1, version: 'test-version' });
+    assert.deepEqual(calls[0].data, { url: 'https://example.com/note', pages: 2, reply_pages: -1, selected_field_keys: ['cid', 'text'], version: 'test-version' });
     assert.equal(calls[1].params.supports_partial_results, 1);
     assert.equal(calls[1].params.version, 'test-version');
     assert.equal(calls[2].data.task_id, 'task/id');
