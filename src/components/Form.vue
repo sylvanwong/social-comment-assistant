@@ -288,7 +288,7 @@ const finishCommentWrite = (taskStatus, hasComments = writtenCommentCount > 0) =
 };
 
 // 写入数据: 新建表格
-const createAndWriteData = async (list, type, task_id, targetTableId = "", taskStatus = 1) => {
+const createAndWriteData = async (list, type, task_id, targetTableId = "", taskStatus = 1, activeFieldConfigs = getActiveFieldConfigs()) => {
   if (disposed) return;
   if (!Array.isArray(list)) {
     resetParams();
@@ -301,7 +301,6 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "", taskS
   }
   progress(`正在写入 ${list.length} 条评论，已写入 ${writtenCommentCount} 条评论`, { stopping: taskStatus == 3 });
   try {
-    const activeFieldConfigs = getActiveFieldConfigs();
     const fields = activeFieldConfigs.map(({ name, type, formatter, dateFormat }) => {
       const field = { name, type };
       if (formatter) field.formatter = formatter;
@@ -402,7 +401,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "", taskS
 
       if (total > page) {
         page += 1;
-        return getList(task_id, 'next', targetTableId, taskStatus);
+        return getList(task_id, 'next', targetTableId, taskStatus, activeFieldConfigs);
       } else {
         finishCommentWrite(taskStatus);
       }
@@ -447,7 +446,7 @@ const createAndWriteData = async (list, type, task_id, targetTableId = "", taskS
 
     if (total > page) {
       page += 1;
-      return getList(task_id, 'next', targetTableId, taskStatus);
+      return getList(task_id, 'next', targetTableId, taskStatus, activeFieldConfigs);
     } else {
       finishCommentWrite(taskStatus);
     }
@@ -535,7 +534,7 @@ const getValidApiKey = () => {
 };
 
 // 主页 提交任务
-const postNoteTask = async (targetTableId = "") => {
+const postNoteTask = async (targetTableId = "", activeFieldConfigs = getActiveFieldConfigs()) => {
   if (disposed) return;
   const validApiKey = getValidApiKey();
   const normalizedUrl = String(formData.value.url || "").trim();
@@ -551,6 +550,7 @@ const postNoteTask = async (targetTableId = "") => {
       // social_type: formData.value.social_type,
       pages: Number(formData.value.pages),
       reply_pages: Number(formData.value.reply_pages),
+      selected_field_keys: activeFieldConfigs.map(field => field.key),
     },
   })
     .then(function (response) {
@@ -560,7 +560,7 @@ const postNoteTask = async (targetTableId = "") => {
       if (res.sta == 0) {
         const data = res.data;
         progress('正在获取评论数据...');
-        getNoteTaskInterval(data.task_id, targetTableId);
+        getNoteTaskInterval(data.task_id, targetTableId, activeFieldConfigs);
       } else {
         loading.value = false;
         fail(res.msg);
@@ -581,7 +581,7 @@ const closeNoteInterval = () => {
 };
 
 // 主页 轮询获取任务状态
-const getNoteTaskInterval = (task_id, targetTableId = "") => {
+const getNoteTaskInterval = (task_id, targetTableId = "", activeFieldConfigs) => {
   if (disposed) return;
   const requestFn = () => {
     let time = 0;
@@ -596,7 +596,7 @@ const getNoteTaskInterval = (task_id, targetTableId = "") => {
         fail("获取数据超时，请稍后重试");
         loading.value = false;
         } else {
-        getNoteTask(task_id, targetTableId);
+        getNoteTask(task_id, targetTableId, activeFieldConfigs);
       }
     }, 3000)
   }
@@ -604,7 +604,7 @@ const getNoteTaskInterval = (task_id, targetTableId = "") => {
 };
 
 // 主页 获取任务状态
-const getNoteTask = async (task_id, targetTableId = "") => {
+const getNoteTask = async (task_id, targetTableId = "", activeFieldConfigs) => {
   if (disposed) return;
   const validApiKey = getValidApiKey();
   await request({
@@ -641,7 +641,7 @@ const getNoteTask = async (task_id, targetTableId = "") => {
           closeNoteInterval();
           page = 1;
           progress(status == 3 ? `获取数据已停止，正在写入剩余结果，已写入 ${writtenCommentCount} 条评论` : '正在读取评论结果...', { stopping: status == 3 });
-          return getList(task_id, "", targetTableId, status);
+          return getList(task_id, "", targetTableId, status, activeFieldConfigs);
         }
       }
     })
@@ -659,7 +659,7 @@ const getNoteTask = async (task_id, targetTableId = "") => {
 }
 
 // 获取帖子列表
-const getList = async (task_id, type, targetTableId = "", taskStatus = 1) => {
+const getList = async (task_id, type, targetTableId = "", taskStatus = 1, activeFieldConfigs) => {
   if (disposed) return;
   const validApiKey = getValidApiKey();
   await request({
@@ -682,9 +682,9 @@ const getList = async (task_id, type, targetTableId = "", taskStatus = 1) => {
         const { count, data } = res.data;
         if (!type) { // 第一次请求
           total = Math.ceil(count / page_size);
-          return createAndWriteData(data, '', task_id, targetTableId, taskStatus);
+          return createAndWriteData(data, '', task_id, targetTableId, taskStatus, activeFieldConfigs);
         } else if (type == 'next') {
-          return createAndWriteData(data, type, task_id, targetTableId, taskStatus);
+          return createAndWriteData(data, type, task_id, targetTableId, taskStatus, activeFieldConfigs);
         }
       } else {
         loading.value = false;
@@ -716,6 +716,7 @@ const commit = async () => {
     showErrorMsg("请选择现有表格");
     return;
   }
+  const activeFieldConfigs = getActiveFieldConfigs();
   loading.value = true;
   cancelling.value = false;
   writtenCommentCount = 0;
@@ -724,13 +725,13 @@ const commit = async () => {
   await nextTick();
   if (disposed) return;
   try {
-    if (radio === 2 && !await validateTableFields(table_id)) {
+    if (radio === 2 && !await validateTableFields(table_id, activeFieldConfigs)) {
       loading.value = false;
       return;
     }
     if (disposed) return;
     progress('正在提交评论获取任务...');
-    await postNoteTask(radio === 2 ? table_id : '');
+    await postNoteTask(radio === 2 ? table_id : '', activeFieldConfigs);
     if (disposed) return;
     if (radio !== 2) {
       // 保存输入不影响已提交任务的执行和结果提示。
@@ -786,7 +787,7 @@ watch(selectedFieldKeys, async (keys) => {
 }, { deep: true });
 
 // 验证表格字段
-const validateTableFields = async (tableId) => {
+const validateTableFields = async (tableId, activeFieldConfigs = getActiveFieldConfigs()) => {
   try {
     const activeTable = await bitable.base.getTableById(tableId);
     const fieldMetaList = await activeTable.getFieldMetaList();
@@ -801,7 +802,7 @@ const validateTableFields = async (tableId) => {
     }
 
     // 检查每个映射字段的类型是否匹配
-    for (const config of getActiveFieldConfigs()) {
+    for (const config of activeFieldConfigs) {
       const fieldId = [config.name, ...(config.legacyNames || [])]
         .map(name => fieldIdByName.get(name))
         .find(Boolean);
